@@ -365,11 +365,16 @@ ibis::bitvector64::word_t ibis::bitvector64::do_cnt() const {
     return nb;
 } // ibis::bitvector64::do_cnt
 
-// replace the ind'th bit with val.  val is assumed to be either 0 or 1.  If
-// val is not 0 or 1, it could cause serious problems.
-// This function can be used to extend the length of the bit sequence.
-// When the given index (ind) is beyond the end of the current sequence, the
-// unspecified bits in the range of [size(), ind) are assumed to be 0.
+/// replace the ind'th bit with val.  val is assumed to be either 0 or 1.  If
+/// val is not 0 or 1, it could cause serious problems.
+/// This function can be used to extend the length of the bit sequence.
+/// When the given index (ind) is beyond the end of the current sequence, the
+/// unspecified bits in the range of [size(), ind) are assumed to be 0.
+///
+/// @warning This function is very expensive.  In order to get to bit ind,
+/// it has to go through all bits 0 through ind-1.  In addition, it might
+/// have to make a copy of all the bits following bit ind.  Use it only if
+/// you have to.
 void ibis::bitvector64::setBit(const word_t ind, int val) {
 #if DEBUG+0 > 1 || _DEBUG+0 > 1
     LOGGER(ibis::gVerbose >= 0)
@@ -583,6 +588,49 @@ void ibis::bitvector64::setBit(const word_t ind, int val) {
     if (nset)
 	nset += val?1:-1;
 } // ibis::bitvector64::setBit
+
+/// Return the value of a bit.
+///
+/// @note If the incoming position is beyond the end of this bitmap, this
+/// function returns 0.
+///
+/// @warning To access the ith bit, this function essentially has to
+/// determine the values of bits 0 through i-1, therefore, it is highly
+/// recommended that you don't use this function.  A compressed bitmap data
+/// structure is simply not the right data structure to support random
+/// accesses!
+int ibis::bitvector64::getBit(const ibis::bitvector64::word_t ind) const {
+    if (ind >= size()) {
+        return 0;
+    }
+    else if (ind >= nbits) {
+        return ((active.val >> (active.nbits - (ind - nbits) - 1)) & 1U);
+    }
+    else if (m_vec.size()*MAXBITS == nbits) { // uncompressed
+        return ((m_vec[ind/MAXBITS] >> (SECONDBIT - (ind % MAXBITS))) & 1U);
+    }
+    else { // need to decompress the compressed words
+        word_t jnd = ind;
+        array_t<word_t>::const_iterator it = m_vec.begin();
+        while (it < m_vec.end()) {
+            if (*it > HEADER0) { // a fill
+                const word_t cnt = ((*it) & MAXCNT) * MAXBITS;
+                if (cnt > jnd) {
+                    return (*it >= HEADER1);
+                }
+                jnd -= cnt;
+            }
+            else if (jnd < MAXBITS) {
+                return ((*it >> (SECONDBIT - jnd - 1)) & 1U);
+            }
+            else {
+                jnd -= MAXBITS;
+            }
+            ++ it;
+        }
+    }
+    return 0;
+} // ibis::bitvector64::getBit
 
 // erase the bit in the range of [i, j)
 void ibis::bitvector64::erase(word_t i, word_t j) {
@@ -1439,6 +1487,18 @@ void ibis::bitvector64::and_c2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::and_c2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {	    // x points to a fill
 		// if both x and y point to fills, use the long one
 		if (y.isFill && y.nWords >= x.nWords) {
@@ -1633,6 +1693,18 @@ void ibis::bitvector64::and_d2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::and_d2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {
 		if (y.isFill && y.nWords >= x.nWords) {
 		    if (y.fillBit == 0) {
@@ -1835,7 +1907,15 @@ void ibis::bitvector64::or_c2(const ibis::bitvector64& rhs,
 	    if (y.nWords == 0)
 		y.decode();
 	    if (x.nWords == 0 || y.nWords == 0) {
-		LOGGER(ibis::gVerbose >= 0)
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
 		    << "ERROR bitvector64::or_c2 -- serious problem here ...";
 	    }
 	    if (x.isFill) { // x points to a fill
@@ -2056,6 +2136,18 @@ void ibis::bitvector64::or_d2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::or_d2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {
 		if (y.isFill && y.nWords >= x.nWords) {
 		    if (y.fillBit == 0) {
@@ -2250,6 +2342,18 @@ void ibis::bitvector64::xor_c2(const ibis::bitvector64& rhs,
 	    x.decode();
 	if (y.nWords == 0)
 	    y.decode();
+        if (x.nWords == 0 || y.nWords == 0) {
+            while (x.nWords == 0 && x.it < m_vec.end()) {
+                ++ x.it;
+                x.decode();
+            }
+            while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                ++ y.it;
+                y.decode();
+            }
+            LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+                << "ERROR bitvector64::xor_c2 -- serious problem here ...";
+        }
 	if (x.isFill) { // x points to a fill
 	    // if both x and y point to a fill, use the longer fill
 	    if (y.isFill && y.nWords >= x.nWords) {
@@ -2408,6 +2512,18 @@ void ibis::bitvector64::xor_d2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::xor_d2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {
 		if (y.isFill && y.nWords >= x.nWords) {
 		    if (y.fillBit == 0) {
@@ -2627,6 +2743,18 @@ void ibis::bitvector64::minus_c2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::minus_c2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {
 		if (y.isFill && y.nWords >= x.nWords) {
 		    if (y.fillBit == 0) {
@@ -2876,6 +3004,18 @@ void ibis::bitvector64::minus_d2(const ibis::bitvector64& rhs,
 		x.decode();
 	    if (y.nWords == 0)
 		y.decode();
+	    if (x.nWords == 0 || y.nWords == 0) {
+                while (x.nWords == 0 && x.it < m_vec.end()) {
+                    ++ x.it;
+                    x.decode();
+                }
+                while (y.nWords == 0 && y.it < rhs.m_vec.end()) {
+                    ++ y.it;
+                    y.decode();
+                }
+		LOGGER(ibis::gVerbose >= 0 && (x.nWords == 0 || y.nWords == 0))
+		    << "ERROR bitvector64::minus_d2 -- serious problem here ...";
+	    }
 	    if (x.isFill) {
 		if (y.isFill && y.nWords >= x.nWords) {
 		    if (y.fillBit == 0) {
