@@ -1,5 +1,5 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2012
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ibis", "ibis.vcxproj", "{360DF97D-FEAB-4A6F-B84F-E348FCA7AB0F}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "thula", "thula.vcxproj", "{360DF97D-FEAB-4A6F-B84F-E348FCA7AB0E}"
