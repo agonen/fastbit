@@ -549,29 +549,29 @@ uint32_t ibis::bin::locate(const double& val) const {
 			static_cast<long unsigned>(i1), bounds[i1],
 			static_cast<long unsigned>(bounds.size()), val);
 #endif
-	LOGGER(ibis::gVerbose > 8)
+	LOGGER(ibis::gVerbose > 10)
 	    << "column[" << col->partition()->name() << "." << col->name()
-	    << "]::bin::locate -- " << std::setprecision(8) << val << " in ["
-	    << std::setprecision(8) << bounds[i0] << ", "
-	    << std::setprecision(8) << bounds[i1] << ") ==> " << i1;
+	    << "]::bin::locate -- " << std::setprecision(16) << val << " in ["
+	    << std::setprecision(16) << bounds[i0] << ", "
+	    << std::setprecision(16) << bounds[i1] << ") ==> " << i1;
 	return i1;
     }
     else { // do linear search
 	for (uint32_t i = 1; i < nobs; ++i) {
 	    if (val < bounds[i]) {
-#if DEBUG+0 > 1 || _DEBUG+0 > 1
+#if DEBUG+0 > 0 || _DEBUG+0 > 1
 		col->logMessage
 		    ("bin::locate", "element %lu (%g) out of %lu is no "
 		     "less than %g",
 		     static_cast<long unsigned>(i), bounds[i],
 		     static_cast<long unsigned>(bounds.size()), val);
 #endif
-		LOGGER(ibis::gVerbose > 8)
+		LOGGER(ibis::gVerbose > 10)
 		    << "column[" << col->partition()->name() << "."
 		    << col->name() << "]::bin::locate -- "
-		    << std::setprecision(8) << val << " in ["
-		    << std::setprecision(8) << bounds[i-1] << ", "
-		    << std::setprecision(8) << bounds[i] << ") ==> " << i;
+		    << std::setprecision(16) << val << " in ["
+		    << std::setprecision(16) << bounds[i-1] << ", "
+		    << std::setprecision(16) << bounds[i] << ") ==> " << i;
 		return i;
 	    }
 	}
@@ -887,6 +887,12 @@ void ibis::bin::binning(const char* f) {
 		    uint32_t k = (iix[1] < nrows ? iix[1] : nrows);
 		    for (uint32_t i = *iix; i < k; ++i) {
 			uint32_t j = locate(val[i]);
+#if defined(DBUG) || defined(_DEBUG)
+                        LOGGER(ibis::gVerbose > 8 && i%1000==0)
+                            << "DEBUG -- binning val[" << i << "] = "
+                            << val[i] << " ==> bin " << j
+                            << (j<nobs?"":" ***out-of-range***");
+#endif
 			if (j < nobs) {
 			    bits[j]->setBit(i, 1);
 			    if (minval[j] > val[i])
@@ -1520,6 +1526,17 @@ void ibis::bin::binningT(const char* f) {
     if (col == 0 || col->partition() == 0) return;
     if (col->partition()->nRows() == 0) return;
 
+    std::string evt="coumn[";
+    evt += col->partition()->name();
+    evt += '.';
+    evt += col->name();
+    evt += "]::bin::binningT<";
+    evt += typeid(E).name();
+    evt += ">(";
+    if (f != 0) {
+        evt += f;
+    }
+    evt += ')';
     horometer timer;
     if (ibis::gVerbose > 4)
 	timer.start();
@@ -1541,7 +1558,7 @@ void ibis::bin::binningT(const char* f) {
     dataFileName(fnm, f);
     if (fnm.empty()) {
 	LOGGER(ibis::gVerbose > 0)
-	    << "Warning -- bin::binning failed to determine the data file "
+	    << "Warning -- " << evt << " failed to determine the data file "
 	    "name from \"" << (f ? f : "") << '"';
 	return;
     }
@@ -1562,8 +1579,9 @@ void ibis::bin::binningT(const char* f) {
     std::vector<array_t<E>*> binned(nobs, 0); // binned version of values
     ibis::fileManager::instance().getFile(fnm.c_str(), val);
     if (val.size() <= 0) {
-	col->logWarning("bin::binning", "unable to read %s (as %s)",
-			fnm.c_str(), typeid(E).name());
+        LOGGER(ibis::gVerbose > 0)
+            << "Warning -- " << evt << " failed to read " << fnm << " as "
+            << typeid(E).name();
 	throw ibis::bad_alloc("fail to read data file");
     }
     else {
@@ -1707,14 +1725,13 @@ void ibis::bin::binningT(const char* f) {
 	ierr = ibis::util::write(fdes, pos.begin(), sizeof(int32_t)*(nobs+1));
 	ierr = UnixSeek(fdes, pos.back(), SEEK_SET);
 	UnixClose(fdes);
-	if (ibis::gVerbose > 3)
-	    col->logMessage("bin::binning", "wrote bin-ordered values to %s",
-			    fnm.c_str());
+	LOGGER(ibis::gVerbose > 3)
+	    << evt << " wrote bin-ordered values to " << fnm;
     }
     else {
-	if (ibis::gVerbose > -1)
-	    col->logMessage("bin::binning", "unable to write bin-ordered "
-			    "values to %s", fnm.c_str());
+	LOGGER(ibis::gVerbose >= 0)
+	    << "Warning -- " << evt << " failed to write bin-ordered values to "
+            << fnm;
 	for (uint32_t i = 0; i < nobs; ++ i) {
 	    if (binned[i] != 0)
 		delete binned[i];
@@ -1723,24 +1740,18 @@ void ibis::bin::binningT(const char* f) {
 
     // write info about the bins
     if (ibis::gVerbose > 2) {
-	if (ibis::gVerbose > 4) {
+        ibis::util::logger lg;
+        if (ibis::gVerbose > 4) {
 	    timer.stop();
-	    col->logMessage("bin::binning", "partitioned %lu %s values into "
-			    "%lu bin(s) + 2 outside bins in %g "
-			    "sec(elapsed)", static_cast<long unsigned>(nrows),
-			    typeid(E).name(),
-			    static_cast<long unsigned>(nobs-2),
-			    timer.realTime());
+	    lg() << evt << " partitioned " << nrows << " values into " << nobs-2
+                 << " bin(s) + 2 outside bins in " << timer.realTime()
+                 << " sec(elapsed)";
 	}
 	else {
-	    col->logMessage("bin::binning", "partitioned %lu %s values into "
-			    "%lu bin(s) + 2 outside bins",
-			    static_cast<long unsigned>(nrows),
-			    typeid(E).name(),
-			    static_cast<long unsigned>(nobs-2));
+	    lg() << evt << "partitioned " << nrows << " values into "
+                 << nobs-2 << " bin(s) + 2 outside bins";
 	}
 	if (ibis::gVerbose > 6) {
-	    ibis::util::logger lg;
 	    lg() << "[minval, maxval]\tbound\tcount\n";
 	    for (uint32_t i = 0; i < nobs; ++i)
 		lg() << "[" << minval[i] << ", " << maxval[i] << "]\t"
@@ -3384,6 +3395,12 @@ void ibis::bin::printGranules(std::ostream& out,
     out << "bin::printGranules(" << bmap.size()
 	<< (bmap.size() > 1 ? " entries" : " entry")
 	<< ")\nkey: count=, count_, min_, max_, count^, min^, max^\n";
+    if (ibis::gVerbose > 7)
+        out << std::setprecision(18);
+    else if (ibis::gVerbose > 5)
+        out << std::setprecision(14);
+    else if (ibis::gVerbose > 3)
+        out << std::setprecision(10);
     uint32_t prt = (ibis::gVerbose > 30 ? bmap.size() : (1 << ibis::gVerbose));
     if (prt < 5) prt = 5;
     if (prt+1 >= bmap.size()) { // print all
@@ -3450,9 +3467,10 @@ void ibis::bin::printGranules(std::ostream& out,
 } //ibis::bin::printGranules
 
 /// Convert the granule map into binned index.  The bitmaps that are not
-/// empty are transferred to the array bits, therefore, the content of gmap
-/// is no longer valid after calling this function.  However, it is still
-/// necessary for the called to free gmap.
+/// empty are transferred to the array bits, and the empty bitmaps are
+/// deleted.  Therefore, the content of gmap is no longer valid after
+/// calling this function.  The only thing that could be done to the
+/// granuleMap object is to free it.
 void ibis::bin::convertGranules(ibis::bin::granuleMap& gmap) {
     // clear the existing content
     clear();
@@ -3473,8 +3491,12 @@ void ibis::bin::convertGranules(ibis::bin::granuleMap& gmap) {
 	    minval.push_back((*it).second->minm);
 	    maxval.push_back((*it).second->maxm);
 	    bits.push_back((*it).second->locm);
-	    (*it).second->locm = 0;
 	}
+        else {
+            delete (*it).second->locm;
+        }
+        (*it).second->locm = 0;
+
 	if ((*it).second->loce != 0 && (*it).second->loce->cnt() > 0) {
 	    if (maxval.size() > 0)
 		bounds.push_back((*it).first);
@@ -3483,8 +3505,12 @@ void ibis::bin::convertGranules(ibis::bin::granuleMap& gmap) {
 	    minval.push_back((*it).first);
 	    maxval.push_back((*it).first);
 	    bits.push_back((*it).second->loce);
-	    (*it).second->loce = 0;
 	}
+        else {
+            delete (*it).second->loce;
+        }
+        (*it).second->loce = 0;
+
 	if ((*it).second->locp != 0 && (*it).second->locp->cnt() > 0) {
 	    if (maxval.size() > 0)
 		bounds.push_back(ibis::util::compactValue
@@ -3494,8 +3520,14 @@ void ibis::bin::convertGranules(ibis::bin::granuleMap& gmap) {
 	    minval.push_back((*it).second->minp);
 	    maxval.push_back((*it).second->maxp);
 	    bits.push_back((*it).second->locp);
-	    (*it).second->locp = 0;
 	}
+        else {
+            delete (*it).second->locp;
+        }
+        (*it).second->locp = 0;
+
+        delete (*it).second;
+        (*it).second = 0;
     }
     // append DBL_MAX as the bin boundary at the end
     bounds.push_back(DBL_MAX);
@@ -4272,14 +4304,14 @@ void ibis::bin::scanAndPartition(const char* f, unsigned eqw, uint32_t nbins) {
 
     mapValues(f, hist, (eqw==10 ? 0 : nbins));
     const uint32_t ncnt = hist.size();
-    histogram::const_iterator it;
     if (ncnt > nbins * 3 / 2) { // more distinct values than the number of bins
 	array_t<double> val(ncnt);
 	array_t<uint32_t> cnt(ncnt);
 	array_t<uint32_t> bnds(nbins);
 	{
 	    uint32_t i = 0;
-	    for (it = hist.begin(); it != hist.end(); ++it, ++i) {
+	    for (histogram::const_iterator it = hist.begin();
+                 it != hist.end(); ++ it, ++ i) {
 		cnt[i] = (*it).second;
 		val[i] = (*it).first;
 	    }
@@ -4389,7 +4421,8 @@ void ibis::bin::scanAndPartition(const char* f, unsigned eqw, uint32_t nbins) {
 	    array_t<uint32_t> tmp;
 	    tmp.reserve(ncnt);
 	    threshold = 0;
-	    for (it = hist.begin(); it != hist.end(); ++ it) {
+	    for (histogram::const_iterator it = hist.begin();
+                 it != hist.end(); ++ it) {
 		tmp.push_back((*it).second);
 		threshold += (*it).second;
 	    }
@@ -4404,7 +4437,8 @@ void ibis::bin::scanAndPartition(const char* f, unsigned eqw, uint32_t nbins) {
 	    else
 		threshold = col->partition()->nRows();
 	}
-	for (it = hist.begin(); it != hist.end(); ++ it) {
+	for (histogram::const_iterator it = hist.begin();
+             it != hist.end(); ++ it) {
 	    if ((*it).second < threshold) {
 		bounds.push_back((*it).first);
 	    }
@@ -4415,7 +4449,7 @@ void ibis::bin::scanAndPartition(const char* f, unsigned eqw, uint32_t nbins) {
 	}
     }
     else if (ncnt > 0) { // one value only
-	it = hist.begin();
+	histogram::const_iterator it = hist.begin();
 	if (fabs((*it).first - 1) < 0.5) {
 	    bounds.push_back(0.0);
 	    bounds.push_back(2.0);
@@ -4803,7 +4837,7 @@ void ibis::bin::setBoundaries(const char* f) {
 	    ibis::util::logger lg(4);
 	    lg() << "DEBUG -- bin bounds after duplicate removal\n";
 	    for (unsigned i = 0; i < bounds.size(); ++ i)
-		lg() << std::setprecision(8) << bounds[i] << " ";
+		lg() << std::setprecision(16) << bounds[i] << " ";
 	}
 #endif
     }
@@ -5785,20 +5819,27 @@ void ibis::bin::print(std::ostream& out) const {
 	<< col->partition()->name() << '.' << col->name()
 	<< " contains " << nobs << " bitvectors for "
 	<< nrows << " objects \n";
-    if (ibis::gVerbose > 4) { // print the long form
+    if (ibis::gVerbose > 3) { // print the long form
 	uint32_t i, cnt = 0;
+        if (ibis::gVerbose > 7)
+            out << std::setprecision(18);
+        else if (ibis::gVerbose > 5)
+            out << std::setprecision(14);
+        else
+            out << std::setprecision(10);
 	if (bits[0]) {
-	    out << "0: " << bits[0]->cnt() << "\t(..., " << bounds[0]
-		<< ")\t[" << minval[0] << ", " << maxval[0] << "]\n";
+	    out << "0: " << bits[0]->cnt() << "\t(..., "
+                << bounds[0] << ")\t[" << minval[0]
+                << ", " << maxval[0] << "]\n";
 	    cnt += bits[0]->cnt();
 	}
 	for (i = 1; i < nobs; ++i) {
 	    if (bits[i] != 0) {
 		if (i < npr)
 		    out << i << ": " << bits[i]->cnt() << "\t["
-			<< bounds[i-1]
-			<< ", " << bounds[i] << ")\t[" << minval[i] << ", "
-			<< maxval[i] << "]\n";
+                        << bounds[i-1] << ", " << bounds[i]
+                        << ")\t[" << minval[i] << ", "
+                        << maxval[i] << "]\n";
 		else
 		    ++ omt;
 		// out << *(bits[i]);
@@ -5810,9 +5851,8 @@ void ibis::bin::print(std::ostream& out) const {
 	}
 	for (i = 0; i < nobs; ++i) {
 	    if (bits[i] != 0 && nrows != bits[i]->size())
-		out << "Warning: bits[" << i << "] contains "
-		    << bits[i]->size()
-		    << " bits, but " << nrows << " are expected\n";
+		out << "Warning -- bits[" << i << "] contains "
+		    << bits[i]->size() << " bits, but expected ";
 	}
 	if (nrows < cnt) {
 	    out << "Warning: There are a total " << cnt << " set bits out of "

@@ -1974,7 +1974,7 @@ int ibis::util::writeLogFileHeader(FILE *fptr, const char *fname) {
 	ierr = fprintf(fptr, "\n%s\nLog file %s opened on %s\n",
 		       str, fname, tstr);
     else if (ibis::gVerbose > 1)
-	ierr = fprintf(fptr, "\n%s\nLog messages started on %s\n",
+	ierr = fprintf(fptr, "\n%s\nLog started on %s\n",
 		       str, tstr);
     else
 	ierr = fprintf(fptr, "\n");
@@ -2129,9 +2129,10 @@ ibis::util::logger::~logger() {
 	// The lock is still necessary because other logging functions use
 	// multiple fprintf statements.
 	ibis::util::ioLock lock;
-	fprintf(fptr, "%s\n", mystr.c_str());
+	(void) fwrite(mystr.c_str(), mystr.size(), 1U, fptr);
+        (void) fwrite("\n", 1U, 1U, fptr);
 #if defined(_DEBUG) || defined(DEBUG) || defined(FASTBIT_SYNC_WRITE)
-	fflush(fptr);
+	(void) fflush(fptr);
 #endif
     }
 } // ibis::util::logger::~logger
